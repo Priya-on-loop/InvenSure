@@ -12,6 +12,8 @@ const productSchema = new mongoose.Schema({
   
   // Tracks if the item has been recycled
   recycled: { type: Boolean, default: false },
+  //Adds pic of the item
+  image: { type: String, default: "" }
 });
 
 const Product = mongoose.model("Product", productSchema);

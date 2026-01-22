@@ -1,8 +1,16 @@
+import 'dart:convert'; // ✅ Added for Image Decoding
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'add_product_screen.dart';
 import 'login_screen.dart';
+
+// NEW IMPORTS
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import '../services/notification_service.dart';
+import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   @override
@@ -10,83 +18,157 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  late Future<List<dynamic>> _productsFuture;
-  String _userRole = 'staff'; // Default role
+  List<dynamic> _allProducts = [];
+  List<dynamic> _filteredProducts = [];
+  bool _isLoading = true;
+  String _userRole = 'staff';
+
+  String _selectedStatus = "All";
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _loadRole(); // 1. Load User Role
-    _refreshProducts();
+    NotificationService.init();
+    _loadRole();
+    _loadProducts();
   }
 
   void _loadRole() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _userRole = prefs.getString('role') ?? 'staff';
-    });
+    setState(() => _userRole = prefs.getString('role') ?? 'staff');
   }
 
-  void _refreshProducts() {
-    setState(() {
-      _productsFuture = ApiService.getProducts().then((data) {
-        _checkAndShowAlerts(data);
-        return data;
-      });
-    });
+  void _loadProducts() {
+    setState(() => _isLoading = true);
+    ApiService.getProducts()
+        .then((data) {
+          setState(() {
+            _allProducts = data;
+            _isLoading = false;
+            _applyFilters();
+          });
+          _checkAndTriggerNotifications(data);
+        })
+        .catchError((err) {
+          setState(() => _isLoading = false);
+        });
   }
 
-  void _checkAndShowAlerts(List<dynamic> products) {
-    List<dynamic> expiringItems = products
-        .where((p) => p['status'] == 'Near Expiry')
-        .toList();
+  void _checkAndTriggerNotifications(List<dynamic> products) async {
+    final prefs = await SharedPreferences.getInstance();
+    bool enabled = prefs.getBool('notifications_enabled') ?? true;
+    int userDaysSetting = prefs.getInt('notification_days') ?? 3;
 
-    if (expiringItems.isNotEmpty) {
+    if (!enabled) return;
+
+    int alertCount = 0;
+    DateTime now = DateTime.now();
+
+    for (var p in products) {
+      try {
+        if (p['expiry'] == null) continue;
+        DateTime expiry = DateTime.parse(p['expiry'].toString());
+        int daysUntil = expiry.difference(now).inDays;
+
+        if (daysUntil >= 0 &&
+            daysUntil <= userDaysSetting &&
+            p['status'] != 'Recycled') {
+          alertCount++;
+        }
+      } catch (e) {
+        print("Date error: $e");
+      }
+    }
+
+    if (alertCount > 0) {
       Future.delayed(Duration.zero, () {
-        if (mounted) _showExpiryDialog(expiringItems.length);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("🔔 Alert: $alertCount items match your settings!"),
+              backgroundColor: Colors.blueAccent,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
       });
+
+      NotificationService.showNotification(
+        id: 101,
+        title: "InvenSure Alert",
+        body: "Action Required: $alertCount items expiring soon.",
+      );
     }
   }
 
-  void _showExpiryDialog(int count) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.warning, color: Colors.orange),
-              SizedBox(width: 10),
-              Text("Expiry Alert!"),
-            ],
-          ),
-          content: Text("⚠️ You have $count items expiring soon!"),
-          actions: [
-            TextButton(
-              child: Text("OK"),
-              onPressed: () => Navigator.of(context).pop(),
+  void _applyFilters() {
+    String query = _searchController.text.toLowerCase();
+    setState(() {
+      _filteredProducts = _allProducts.where((p) {
+        if (_selectedStatus != "All" && p['status'] != _selectedStatus)
+          return false;
+        String name = p['name'].toString().toLowerCase();
+        String id = p['id'].toString();
+        return name.contains(query) || id.contains(query);
+      }).toList();
+    });
+  }
+
+  void _generatePdf() async {
+    final doc = pw.Document();
+    final date = DateTime.now().toString().split(' ')[0];
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return [
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [pw.Text("InvenSure Report"), pw.Text("Date: $date")],
+              ),
             ),
-          ],
-        );
-      },
+            pw.Text("Filter: $_selectedStatus Products"),
+            pw.Table.fromTextArray(
+              headers: ["ID", "Product Name", "Expiry", "Status"],
+              data: _filteredProducts
+                  .map(
+                    (p) => [
+                      p['id'].toString(),
+                      p['name'].toString(),
+                      p['expiry'].toString(),
+                      p['status'].toString(),
+                    ],
+                  )
+                  .toList(),
+            ),
+          ];
+        },
+      ),
+    );
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => doc.save(),
+      name: 'Report.pdf',
     );
   }
 
-  // ✅ LOGIC: Recycle Product
   void _recycle(int id) async {
     bool confirm =
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text("Confirm Recycle"),
-            content: Text("Mark product ID $id as Recycled on Blockchain?"),
+            title: Text("♻️ Recycle Product?"),
+            content: Text("This will update the Blockchain."),
             actions: [
               TextButton(
                 child: Text("Cancel"),
                 onPressed: () => Navigator.pop(context, false),
               ),
               TextButton(
-                child: Text("Recycle"),
+                child: Text("Confirm"),
                 onPressed: () => Navigator.pop(context, true),
               ),
             ],
@@ -97,14 +179,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (confirm) {
       try {
         await ApiService.recycleProduct(id);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("♻️ Product Recycled!")));
-        _refreshProducts();
+        _loadProducts();
       } catch (e) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text("Failed to recycle")));
+        ).showSnackBar(SnackBar(content: Text("Failed.")));
       }
     }
   }
@@ -118,83 +197,228 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Color _getStatusColor(String status) {
-    if (status == 'Fresh') return Colors.green;
-    if (status == 'Near Expiry') return Colors.orange;
-    if (status == 'Expired') return Colors.red;
-    return Colors.grey;
-  }
-
   @override
   Widget build(BuildContext context) {
+    int fresh = _allProducts.where((p) => p['status'] == 'Fresh').length;
+    int near = _allProducts.where((p) => p['status'] == 'Near Expiry').length;
+    int expired = _allProducts.where((p) => p['status'] == 'Expired').length;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text("Dashboard ($_userRole)"),
-        actions: [IconButton(icon: Icon(Icons.logout), onPressed: _logout)],
+        title: Text("Dashboard"),
+        actions: [
+          IconButton(icon: Icon(Icons.picture_as_pdf), onPressed: _generatePdf),
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => SettingsScreen()),
+              ).then((_) => _loadProducts());
+            },
+          ),
+          IconButton(icon: Icon(Icons.logout), onPressed: _logout),
+        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: Icon(Icons.qr_code_scanner),
-        label: Text("Scan"),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.qr_code_scanner),
         onPressed: () async {
           await Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => AddProductScreen()),
           );
-          _refreshProducts();
+          _loadProducts();
         },
       ),
-      body: FutureBuilder<List<dynamic>>(
-        future: _productsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting)
-            return Center(child: CircularProgressIndicator());
-          if (snapshot.hasError)
-            return Center(child: Text("Connection Error."));
-          final products = snapshot.data ?? [];
-          if (products.isEmpty) return Center(child: Text("No products found"));
-
-          return ListView.builder(
-            itemCount: products.length,
-            itemBuilder: (context, index) {
-              final p = products[index];
-              return Card(
-                elevation: 3,
-                margin: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: _getStatusColor(
-                      p['status'],
-                    ).withOpacity(0.2),
-                    child: Icon(
-                      Icons.inventory,
-                      color: _getStatusColor(p['status']),
-                    ),
-                  ),
-                  title: Text(
-                    p['name'],
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text("ID: ${p['id']} \nExp: ${p['expiry']}"),
-                  isThreeLine: true,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // ✅ THE RECYCLE BUTTON (Visible only to Admins)
-                      if (_userRole == 'admin' && p['status'] != 'Recycled')
-                        IconButton(
-                          icon: Icon(Icons.delete_outline, color: Colors.red),
-                          onPressed: () => _recycle(p['id']),
-                        ),
-                      if (p['status'] == 'Recycled')
-                        Icon(Icons.check_circle, color: Colors.grey),
-                    ],
-                  ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                _buildStatCard("Fresh", fresh, Colors.green),
+                _buildStatCard("Warning", near, Colors.orange),
+                _buildStatCard("Expired", expired, Colors.red),
+              ],
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                _buildFilterChip("All", Colors.blue),
+                _buildFilterChip("Fresh", Colors.green),
+                _buildFilterChip("Near Expiry", Colors.orange),
+                _buildFilterChip("Expired", Colors.red),
+                if (_userRole == 'admin')
+                  _buildFilterChip("Recycled", Colors.grey),
+              ],
+            ),
+          ),
+          SizedBox(height: 5),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: "Search...",
+                prefixIcon: Icon(Icons.search),
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              );
-            },
-          );
+              ),
+              onChanged: (val) => _applyFilters(),
+            ),
+          ),
+          Expanded(
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator())
+                : _filteredProducts.isEmpty
+                ? Center(child: Text("No items found"))
+                : ListView.builder(
+                    itemCount: _filteredProducts.length,
+                    itemBuilder: (context, index) {
+                      final p = _filteredProducts[index];
+                      return Card(
+                        margin: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        child: ListTile(
+                          // ✅ MODIFIED: Logic to show Image OR Icon
+                          leading: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.grey[200],
+                            ),
+                            child: ClipOval(
+                              child:
+                                  (p['image'] != null &&
+                                      p['image'].toString().isNotEmpty)
+                                  ? Image.memory(
+                                      base64Decode(p['image']),
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                              CircleAvatar(
+                                                backgroundColor:
+                                                    _getStatusColor(
+                                                      p['status'],
+                                                    ),
+                                                child: Icon(
+                                                  Icons.broken_image,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                    )
+                                  : CircleAvatar(
+                                      backgroundColor: _getStatusColor(
+                                        p['status'],
+                                      ),
+                                      child: Icon(
+                                        Icons.inventory_2,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          title: Text(
+                            p['name'],
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text("Expires: ${p['expiry']}"),
+                          trailing:
+                              (_userRole == 'admin' &&
+                                  p['status'] != 'Recycled')
+                              ? IconButton(
+                                  icon: Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () => _recycle(p['id']),
+                                )
+                              : null,
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, Color color) {
+    bool isSelected = _selectedStatus == label;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: isSelected,
+        selectedColor: color,
+        onSelected: (s) {
+          setState(() {
+            _selectedStatus = label;
+            _applyFilters();
+          });
         },
       ),
     );
+  }
+
+  Widget _buildStatCard(String title, int count, Color color) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            if (title == "Warning")
+              _selectedStatus = "Near Expiry";
+            else if (title == "Fresh")
+              _selectedStatus = "Fresh";
+            else if (title == "Expired")
+              _selectedStatus = "Expired";
+            _applyFilters();
+          });
+        },
+        child: Container(
+          margin: EdgeInsets.all(4),
+          padding: EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.3)),
+          ),
+          child: Column(
+            children: [
+              Text(
+                count.toString(),
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black54,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    if (status == 'Fresh') return Colors.green;
+    if (status == 'Near Expiry') return Colors.orange;
+    if (status == 'Expired') return Colors.red;
+    return Colors.grey;
   }
 }

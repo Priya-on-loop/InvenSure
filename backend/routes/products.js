@@ -34,7 +34,7 @@ const getContract = () => {
 // Endpoint: POST /addProduct
 router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) => {
   try {
-    const { id, name, expiry } = req.body;
+    const { id, name, expiry, image } = req.body;
 
     // 1. Convert Date String (YYYY-MM-DD) to Timestamp (Number)
     const expiryTimestamp = new Date(expiry).getTime();
@@ -44,7 +44,8 @@ router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) 
       id,
       name,
       expiry: expiryTimestamp,
-      recycled: false
+      recycled: false,
+      image: image || ""
     });
     await newProduct.save();
 
