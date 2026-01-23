@@ -7,13 +7,23 @@ const authMiddleware = require("../middleware/auth");
 // 1. REGISTER
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body; // ✅ Extract 'role'
     
-    // Check if email OR name already exists (Unique names required now)
-    const exists = await User.findOne({ $or: [{ email }, { name }] });
-    if (exists) return res.status(400).json({ success: false, message: "User/Email exists" });
+    const exists = await User.findOne({ email });
+    if (exists) return res.status(400).json({ success: false, message: "User exists" });
 
-    const user = new User({ name, email, password, role: "staff", isApproved: false });
+    // ✅ VALIDATION: Only allow 'staff' or 'recycler'. Prevent 'admin' hacking.
+    let userRole = "staff"; // Default
+    if (role === "recycler") userRole = "recycler"; 
+
+    const user = new User({ 
+      name, 
+      email, 
+      password,
+      role: userRole,     // ✅ Use the validated role
+      isApproved: false   // Locked until you approve
+    });
+    
     await user.save();
     res.json({ success: true, message: "Registered. Wait for Approval." });
   } catch (err) {

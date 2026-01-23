@@ -10,7 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
 import 'settings_screen.dart';
-import 'admin_users_screen.dart'; // ✅ This import will work now
+import 'admin_users_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   @override
@@ -77,15 +77,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
           alertCount++;
         }
       } catch (e) {
-        print("Date error: $e");
+        // print("Date error: $e");
       }
     }
 
     if (alertCount > 0) {
+      Future.delayed(Duration.zero, () {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("🔔 Alert: $alertCount items expiring soon!"),
+              backgroundColor: Colors.blueAccent,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      });
+
       NotificationService.showNotification(
         id: 101,
         title: "InvenSure Alert",
-        body: "Action Required: $alertCount items expiring soon.",
+        body:
+            "Action Required: $alertCount items expiring within $userDaysSetting days.",
       );
     }
   }
@@ -143,20 +156,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _recycle(int id) async {
+  // ✅ UPDATED LOGIC: Prompt to Assign Recycler
+  void _assignRecycle(int prodId) async {
+    // 1. Fetch Recyclers list from backend
+    List<dynamic> recyclers = await ApiService.getRecyclersList();
+
+    if (recyclers.isEmpty) {
+      // Fallback if no recyclers exist -> Do old immediate delete
+      _directRecycle(prodId);
+      return;
+    }
+
+    // 2. Show Assignment Dialog
+    showDialog(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: Text("Assign to Recycler"),
+          children: [
+            ...recyclers.map((r) {
+              return SimpleDialogOption(
+                padding: EdgeInsets.all(12),
+                child: Text(r['name'], style: TextStyle(fontSize: 16)),
+                onPressed: () async {
+                  Navigator.pop(context); // Close dialog
+                  await ApiService.assignTask(prodId, r['_id']);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Job assigned to ${r['name']}")),
+                  );
+                  _loadProducts(); // Refresh list
+                },
+              );
+            }).toList(),
+            // Option to cancel
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: TextButton(
+                child: Text("Cancel"),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Legacy fallback if no recyclers registered (or for immediate trash)
+  void _directRecycle(int id) async {
     bool confirm =
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text("♻️ Recycle Product?"),
-            content: Text("This will update the Blockchain."),
+            title: Text("No Recyclers Found"),
+            content: Text(
+              "Do you want to recycle this item immediately on the Blockchain?",
+            ),
             actions: [
               TextButton(
                 child: Text("Cancel"),
                 onPressed: () => Navigator.pop(context, false),
               ),
               TextButton(
-                child: Text("Confirm"),
+                child: Text("Recycle Now"),
                 onPressed: () => Navigator.pop(context, true),
               ),
             ],
@@ -167,6 +229,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (confirm) {
       try {
         await ApiService.recycleProduct(id);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("✅ Item Recycled!")));
         _loadProducts();
       } catch (e) {
         ScaffoldMessenger.of(
@@ -209,6 +274,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (_userRole == 'admin')
             IconButton(
               icon: Icon(Icons.manage_accounts, color: Colors.redAccent),
+              tooltip: "Manage Staff",
               onPressed: () {
                 Navigator.push(
                   context,
@@ -311,11 +377,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           subtitle: Text("Expires: ${p['expiry']}"),
                           trailing:
+                              // ✅ Updated to call Assign function instead of Direct Delete
                               (_userRole == 'admin' &&
                                   p['status'] != 'Recycled')
                               ? IconButton(
                                   icon: Icon(Icons.delete, color: Colors.red),
-                                  onPressed: () => _recycle(p['id']),
+                                  onPressed: () => _assignRecycle(
+                                    p['id'],
+                                  ), // <-- Calls new assignment flow
                                 )
                               : null,
                         ),
@@ -328,7 +397,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ✅ HELPER WIDGETS (This part was missing before!)
+  // Helpers
   Widget _fallbackIcon(String status) {
     return CircleAvatar(
       backgroundColor: _getStatusColor(status),

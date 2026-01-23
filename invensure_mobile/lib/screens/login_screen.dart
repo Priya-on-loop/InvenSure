@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import 'recycler_dashboard.dart';
 import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -10,11 +11,12 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLogin = true;
-  // ❌ DELETED: String _selectedRole variable is gone.
+  String _selectedRole = 'staff';
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
   bool _isLoading = false;
 
   void _submit() async {
@@ -30,18 +32,18 @@ class _LoginScreenState extends State<LoginScreen> {
     Map<String, dynamic> data;
 
     if (_isLogin) {
-      // LOGIN LOGIC
+      // LOGIN
       data = await ApiService.login(
         _emailController.text,
         _passwordController.text,
       );
     } else {
-      // ✅ REGISTER LOGIC (Strict)
-      // We removed the 'role' argument. Backend automatically sets them to 'staff'.
+      // REGISTER
       data = await ApiService.register(
         _nameController.text,
         _emailController.text,
         _passwordController.text,
+        _selectedRole,
       );
     }
 
@@ -49,33 +51,45 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (data['success'] == true) {
       if (_isLogin) {
-        // Login Success
+        // ✅ LOGIN SUCCESS
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', data['token']);
-        await prefs.setString('role', data['role'] ?? 'staff');
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => DashboardScreen()),
-        );
+        // Normalize role
+        String role = (data['role'] ?? 'staff').toString().toLowerCase();
+        await prefs.setString('role', role);
+
+        // ✅ ROLE-BASED NAVIGATION
+        if (role == 'recycler') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => RecyclerDashboard()),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => DashboardScreen()),
+          );
+        }
       } else {
-        // Register Success -> Show "Wait for Approval" message
-        // 🔒 The backend message will say "Please wait for Admin approval"
+        // ✅ REGISTER SUCCESS
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(data['message'] ?? "Registered. Wait for approval."),
+            content: Text(
+              data['message'] ?? "Registered! Wait for Admin approval.",
+            ),
             backgroundColor: Colors.orange,
             duration: Duration(seconds: 4),
           ),
         );
 
         setState(() {
-          _isLogin = true; // Switch back to Login form
+          _isLogin = true;
           _passwordController.clear();
         });
       }
     } else {
-      // Error (e.g., Account not approved yet)
+      // ❌ ERROR
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(data['message'] ?? 'Action failed'),
@@ -90,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(_isLogin ? "InvenSure Login" : "Staff Registration"),
+        title: Text(_isLogin ? "InvenSure Login" : "Register Account"),
         elevation: 0,
       ),
       body: Center(
@@ -99,7 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // LOGO
+              // Logo
               Container(
                 height: 140,
                 decoration: BoxDecoration(
@@ -108,7 +122,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 child: Image.asset('assets/logo.png', height: 140),
               ),
+
               SizedBox(height: 10),
+
               Column(
                 children: [
                   Text(
@@ -133,9 +149,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
+
               SizedBox(height: 40),
 
-              // INPUT FIELDS
               if (!_isLogin) ...[
                 TextField(
                   controller: _nameController,
@@ -145,18 +161,38 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 SizedBox(height: 10),
-                // ❌ DELETED: The Role Dropdown is gone. Users have no choice now.
+
+                DropdownButtonFormField<String>(
+                  value: _selectedRole,
+                  decoration: InputDecoration(
+                    labelText: "I am a...",
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: "staff",
+                      child: Text("Staff Member"),
+                    ),
+                    DropdownMenuItem(
+                      value: "recycler",
+                      child: Text("Recycling Partner"),
+                    ),
+                  ],
+                  onChanged: (val) => setState(() => _selectedRole = val!),
+                ),
+                SizedBox(height: 10),
               ],
 
               TextField(
                 controller: _emailController,
                 decoration: InputDecoration(
-                  labelText: "Email",
-                  prefixIcon: Icon(Icons.email),
+                  labelText: _isLogin ? "Email OR Name" : "Email Address",
+                  prefixIcon: Icon(_isLogin ? Icons.person : Icons.email),
                   border: OutlineInputBorder(),
                 ),
               ),
               SizedBox(height: 10),
+
               TextField(
                 controller: _passwordController,
                 decoration: InputDecoration(
@@ -168,32 +204,32 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               SizedBox(height: 25),
+
               _isLoading
                   ? CircularProgressIndicator()
                   : SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _submit,
-                        child: Padding(
-                          padding: EdgeInsets.all(14),
-                          child: Text(
-                            _isLogin ? "LOGIN" : "REGISTER",
-                            style: TextStyle(fontSize: 16),
-                          ),
-                        ),
                         style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.all(14),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
+                        ),
+                        child: Text(
+                          _isLogin ? "LOGIN" : "REGISTER",
+                          style: TextStyle(fontSize: 16),
                         ),
                       ),
                     ),
 
               SizedBox(height: 20),
+
               TextButton(
                 onPressed: () => setState(() => _isLogin = !_isLogin),
                 child: Text(
-                  _isLogin ? "New Staff? Register Here" : "Back to Login",
+                  _isLogin ? "Register as Staff/Recycler" : "Back to Login",
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),

@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const Product = require("../models/Product");
+const User = require("../models/User"); // ✅ Import User Model to find recyclers
 const authMiddleware = require("../middleware/auth");
 const { ethers } = require("ethers");
 
 // --- BLOCKCHAIN SETUP ---
-// We use the variables from your .env file
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
@@ -30,16 +30,13 @@ const getContract = () => {
 
 // --- ROUTES ---
 
-// 1. ADD PRODUCT
-// Endpoint: POST /addProduct
+// 1. ADD PRODUCT (Includes Image & Blockchain)
 router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) => {
   try {
     const { id, name, expiry, image } = req.body;
 
-    // 1. Convert Date String (YYYY-MM-DD) to Timestamp (Number)
     const expiryTimestamp = new Date(expiry).getTime();
 
-    // 2. Save to MongoDB
     const newProduct = new Product({
       id,
       name,
@@ -49,11 +46,8 @@ router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) 
     });
     await newProduct.save();
 
-    // 3. Save to Blockchain (Fire and forget, or await if strict)
     const contract = getContract();
     if (contract) {
-      // Note: Blockchain takes seconds, we assume it works to keep UI fast
-      // In production, use a queue system
       const tx = await contract.addProduct(id, name, expiryTimestamp);
       console.log(`Transaction sent: ${tx.hash}`);
     }
@@ -66,15 +60,13 @@ router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) 
   }
 });
 
-// 2. GET ALL PRODUCTS
-// Endpoint: GET /allProducts
-router.get("/allProducts", authMiddleware(["admin", "staff"]), async (req, res) => {
+// 2. GET ALL PRODUCTS (Dashboard)
+router.get("/allProducts", authMiddleware(["admin", "staff", "recycler"]), async (req, res) => {
   try {
     const products = await Product.find();
     const currentTime = Date.now();
     const threeDays = 3 * 24 * 60 * 60 * 1000;
 
-    // Transform data for Frontend (Add 'status' field)
     const formattedProducts = products.map((p) => {
       let status = "Fresh";
       
@@ -89,10 +81,11 @@ router.get("/allProducts", authMiddleware(["admin", "staff"]), async (req, res) 
       return {
         id: p.id,
         name: p.name,
-        // Convert timestamp back to readable date for UI
-        expiry: new Date(p.expiry).toLocaleDateString(), 
-        status: status, 
-        recycled: p.recycled
+        expiry: new Date(p.expiry).toLocaleDateString(),
+        status: status,
+        recycled: p.recycled,
+        image: p.image, // ✅ ADDED: Send image to frontend
+        recyclingStatus: p.recyclingStatus
       };
     });
 
@@ -103,30 +96,115 @@ router.get("/allProducts", authMiddleware(["admin", "staff"]), async (req, res) 
   }
 });
 
-// 3. RECYCLE PRODUCT
-// Endpoint: POST /recycleProduct/:id
+// 3. ADMIN: DIRECT RECYCLE (Quick Action)
 router.post("/recycleProduct/:id", authMiddleware(["admin"]), async (req, res) => {
   try {
     const productId = req.params.id;
-
-    // 1. Update MongoDB
     const product = await Product.findOne({ id: productId });
+    
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    product.recycled = true;
-    await product.save();
-
-    // 2. Update Blockchain
+    // Blockchain
     const contract = getContract();
     if (contract) {
-      const tx = await contract.markAsRecycled(productId);
-      console.log(`Recycle TX sent: ${tx.hash}`);
+      try {
+        const tx = await contract.markAsRecycled(productId);
+        console.log(`Recycle TX sent: ${tx.hash}`);
+      } catch (txError) {
+        console.error("Blockchain error:", txError);
+      }
     }
+
+    // Database
+    product.recycled = true;
+    product.recyclingStatus = "completed";
+    await product.save();
 
     res.json({ success: true, message: "Product recycled" });
 
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- ✅ NEW RECYCLER WORKFLOW ROUTES ---
+
+// 4. GET AVAILABLE RECYCLERS (Admin)
+router.get("/recyclers/list", authMiddleware(["admin"]), async (req, res) => {
+  try {
+    // Fetch users who registered as 'recycler' and are approved
+    const recyclers = await User.find({ role: "recycler", isApproved: true }).select("name email");
+    res.json({ recyclers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. ASSIGN RECYCLE TASK (Admin)
+router.post("/assign-recycle/:id", authMiddleware(["admin"]), async (req, res) => {
+  try {
+    const { recyclerId } = req.body;
+    const productId = req.params.id;
+
+    await Product.findOneAndUpdate({ id: productId }, {
+      assignedRecycler: recyclerId,
+      recyclingStatus: "assigned",
+      assignedDate: Date.now()
+    });
+
+    res.json({ success: true, message: "Task Assigned to Recycler" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. GET ASSIGNED TASKS (Recycler)
+router.get("/recycler/tasks", authMiddleware(["recycler"]), async (req, res) => {
+  try {
+    const tasks = await Product.find({ 
+      assignedRecycler: req.user.id, 
+      recyclingStatus: "assigned" 
+    });
+    
+    // Format basic data for recycler view
+    const formattedTasks = tasks.map(t => ({
+      id: t.id,
+      name: t.name,
+      expiry: new Date(t.expiry).toLocaleDateString(),
+      image: t.image
+    }));
+
+    res.json({ tasks: formattedTasks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. COMPLETE TASK (Recycler -> Updates Blockchain)
+router.post("/recycler/complete/:id", authMiddleware(["recycler"]), async (req, res) => {
+  try {
+    const product = await Product.findOne({ id: req.params.id });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    // A. Write to Blockchain
+    const contract = getContract();
+    if (contract) {
+      try {
+        const tx = await contract.markAsRecycled(product.id);
+        console.log(`Blockchain Recycled by Worker: ${tx.hash}`);
+      } catch (txError) {
+        console.error("Blockchain error:", txError);
+      }
+    }
+
+    // B. Update Database
+    product.recyclingStatus = "completed";
+    product.recycled = true;
+    await product.save();
+
+    res.json({ success: true, message: "Collection Completed!" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
