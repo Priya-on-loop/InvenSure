@@ -5,13 +5,12 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  // 🔒 Security: Default role is ALWAYS staff. Only DB admin changes this.
+  // 🔒 FORCE DEFAULT: Everyone starts as staff.
   role: { type: String, enum: ["admin", "staff"], default: "staff" },
-  // 🔒 Security: New users cannot login until approved.
-  isApproved: { type: Boolean, default: false },
+  // 🔒 FORCE LOCK: Everyone starts locked out.
+  isApproved: { type: Boolean, default: false }, 
 });
 
-// Hash password
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;
   this.password = await bcrypt.hash(this.password, 10);
