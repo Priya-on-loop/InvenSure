@@ -10,7 +10,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLogin = true;
-  String _selectedRole = 'staff';
+  // ❌ DELETED: String _selectedRole variable is gone.
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
@@ -26,19 +26,22 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = true);
+
     Map<String, dynamic> data;
 
     if (_isLogin) {
+      // LOGIN LOGIC
       data = await ApiService.login(
         _emailController.text,
         _passwordController.text,
       );
     } else {
+      // ✅ REGISTER LOGIC (Strict)
+      // We removed the 'role' argument. Backend automatically sets them to 'staff'.
       data = await ApiService.register(
         _nameController.text,
         _emailController.text,
         _passwordController.text,
-        _selectedRole,
       );
     }
 
@@ -46,25 +49,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (data['success'] == true) {
       if (_isLogin) {
+        // Login Success
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', data['token']);
         await prefs.setString('role', data['role'] ?? 'staff');
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => DashboardScreen()),
         );
       } else {
+        // Register Success -> Show "Wait for Approval" message
+        // 🔒 The backend message will say "Please wait for Admin approval"
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("✅ Account Created! Please Login.")),
+          SnackBar(
+            content: Text(data['message'] ?? "Registered. Wait for approval."),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 4),
+          ),
         );
+
         setState(() {
-          _isLogin = true;
+          _isLogin = true; // Switch back to Login form
           _passwordController.clear();
         });
       }
     } else {
+      // Error (e.g., Account not approved yet)
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(data['message'] ?? 'Action failed')),
+        SnackBar(
+          content: Text(data['message'] ?? 'Action failed'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -72,9 +88,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // Clean background
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(_isLogin ? "InvenSure Login" : "Create New Account"),
+        title: Text(_isLogin ? "InvenSure Login" : "Staff Registration"),
         elevation: 0,
       ),
       body: Center(
@@ -83,27 +99,16 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 1. THE CIRCLE LOGO
+              // LOGO
               Container(
                 height: 140,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ],
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)],
                 ),
-                // Ensure your cropped circle is saved as assets/logo.png
                 child: Image.asset('assets/logo.png', height: 140),
               ),
-
               SizedBox(height: 10),
-
-              // 2. THE STYLED TEXT ("InvenSure")
-              // We draw the text here so it matches your design image
               Column(
                 children: [
                   Text(
@@ -111,11 +116,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF2C3E50), // Dark Grey-Blue color
+                      color: Color(0xFF2C3E50),
                       letterSpacing: 1.2,
                     ),
                   ),
-                  // The colored underline from your logo
                   Container(
                     margin: EdgeInsets.only(top: 5),
                     height: 4,
@@ -129,10 +133,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
-
               SizedBox(height: 40),
 
-              // 3. INPUT FIELDS
+              // INPUT FIELDS
               if (!_isLogin) ...[
                 TextField(
                   controller: _nameController,
@@ -142,25 +145,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: _selectedRole,
-                  decoration: InputDecoration(
-                    labelText: "Select Role",
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    DropdownMenuItem(
-                      value: "staff",
-                      child: Text("Staff (View Only)"),
-                    ),
-                    DropdownMenuItem(
-                      value: "admin",
-                      child: Text("Admin (Full Access)"),
-                    ),
-                  ],
-                  onChanged: (val) => setState(() => _selectedRole = val!),
-                ),
-                SizedBox(height: 10),
+                // ❌ DELETED: The Role Dropdown is gone. Users have no choice now.
               ],
 
               TextField(
@@ -206,13 +191,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
               SizedBox(height: 20),
               TextButton(
-                onPressed: () {
-                  setState(() {
-                    _isLogin = !_isLogin;
-                  });
-                },
+                onPressed: () => setState(() => _isLogin = !_isLogin),
                 child: Text(
-                  _isLogin ? "New User? Create Account" : "Back to Login",
+                  _isLogin ? "New Staff? Register Here" : "Back to Login",
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),

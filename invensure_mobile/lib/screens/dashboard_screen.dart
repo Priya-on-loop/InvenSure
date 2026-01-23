@@ -1,4 +1,4 @@
-import 'dart:convert'; // ✅ REQUIRED FOR IMAGES
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
@@ -10,6 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
 import 'settings_screen.dart';
+import 'admin_users_screen.dart'; // ✅ This import will work now
 
 class DashboardScreen extends StatefulWidget {
   @override
@@ -81,8 +82,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     if (alertCount > 0) {
-      // Logic for in-app and system notifications is handled here
-      // (Simplified for brevity, assuming existing notification logic)
+      NotificationService.showNotification(
+        id: 101,
+        title: "InvenSure Alert",
+        body: "Action Required: $alertCount items expiring soon.",
+      );
     }
   }
 
@@ -201,6 +205,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ).then((_) => _loadProducts());
             },
           ),
+
+          if (_userRole == 'admin')
+            IconButton(
+              icon: Icon(Icons.manage_accounts, color: Colors.redAccent),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => AdminUsersScreen()),
+                );
+              },
+            ),
+
           IconButton(icon: Icon(Icons.logout), onPressed: _logout),
         ],
       ),
@@ -256,13 +272,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onChanged: (val) => _applyFilters(),
             ),
           ),
-
-          // ✅ LIST VIEW WITH IMAGE LOGIC
           Expanded(
             child: _isLoading
                 ? Center(child: CircularProgressIndicator())
-                : _filteredProducts.isEmpty
-                ? Center(child: Text("No items found"))
                 : ListView.builder(
                     itemCount: _filteredProducts.length,
                     itemBuilder: (context, index) {
@@ -273,7 +285,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           vertical: 5,
                         ),
                         child: ListTile(
-                          // 👇 UPDATED IMAGE LOGIC
                           leading: Container(
                             width: 50,
                             height: 50,
@@ -285,16 +296,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child:
                                   (p['image'] != null &&
                                       p['image'].toString().length > 100)
-                                  // ^ Check if string is long enough to be an image
                                   ? Image.memory(
                                       base64Decode(p['image']),
                                       fit: BoxFit.cover,
                                       errorBuilder: (ctx, err, stack) =>
                                           _fallbackIcon(p['status']),
                                     )
-                                  : _fallbackIcon(
-                                      p['status'],
-                                    ), // Show fallback if no image
+                                  : _fallbackIcon(p['status']),
                             ),
                           ),
                           title: Text(
@@ -320,7 +328,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ✅ Helper for showing the status icon
+  // ✅ HELPER WIDGETS (This part was missing before!)
   Widget _fallbackIcon(String status) {
     return CircleAvatar(
       backgroundColor: _getStatusColor(status),
