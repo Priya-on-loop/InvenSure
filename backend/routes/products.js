@@ -30,10 +30,11 @@ const getContract = () => {
 
 // --- ROUTES ---
 
-// 1. ADD PRODUCT (Includes Image & Blockchain)
+// 1. ADD PRODUCT (Includes Category, Image & Blockchain)
 router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) => {
   try {
-    const { id, name, expiry, image } = req.body;
+    // ✅ Extract 'category' from request
+    const { id, name, expiry, image, category } = req.body;
 
     const expiryTimestamp = new Date(expiry).getTime();
 
@@ -42,7 +43,9 @@ router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) 
       name,
       expiry: expiryTimestamp,
       recycled: false,
-      image: image || ""
+      image: image || "",
+      // ✅ Save Category (Default to General if missing)
+      category: category || "General" 
     });
     await newProduct.save();
 
@@ -84,7 +87,8 @@ router.get("/allProducts", authMiddleware(["admin", "staff", "recycler"]), async
         expiry: new Date(p.expiry).toLocaleDateString(),
         status: status,
         recycled: p.recycled,
-        image: p.image, // ✅ ADDED: Send image to frontend
+        image: p.image,
+        category: p.category || "General", // ✅ Send category to frontend
         recyclingStatus: p.recyclingStatus
       };
     });

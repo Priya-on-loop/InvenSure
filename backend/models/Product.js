@@ -16,18 +16,16 @@ const ProductSchema = new mongoose.Schema({
   // Stores the product picture as a Base64 string
   image: { type: String, default: "" },
 
-  // ✅ NEW: Workflow Fields for Recyclers
-  // Links to the User who is assigned to recycle this
-  assignedRecycler: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-  
-  // Tracks the current status of the recycling job
+  // ✅ NEW: Category Field (For Sidebar filtering)
+  category: { type: String, default: "General" },
+
+  // --- Recycler Workflow Fields ---
+  assignedRecycler: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, 
   recyclingStatus: { 
     type: String, 
     enum: ['none', 'assigned', 'completed'], 
     default: 'none' 
   },
-  
-  // When the admin assigned the task
   assignedDate: { type: Date }
 });
 
