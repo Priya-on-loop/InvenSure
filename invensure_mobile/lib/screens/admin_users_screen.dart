@@ -13,6 +13,21 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
   List<dynamic> _activeUsers = [];
   bool _isLoading = true;
 
+  // ✅ List of Sections (Matches your Add Product Categories)
+  final List<String> _sections = [
+    "All",
+    "General",
+    "Dairy",
+    "Vegetables",
+    "Fruits",
+    "Meat",
+    "Medicine",
+    "Beverages",
+    "Snacks",
+    "Household",
+    "Bakery",
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -20,15 +35,64 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
     _loadData();
   }
 
-  void _loadData() async {
+  // Reloads the lists from Cloud
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final pending = await ApiService.getUsers('pending');
-    final active = await ApiService.getUsers('active');
-    setState(() {
-      _pendingUsers = pending;
-      _activeUsers = active;
-      _isLoading = false;
-    });
+    try {
+      final pending = await ApiService.getUsers('pending');
+      final active = await ApiService.getUsers('active');
+      setState(() {
+        _pendingUsers = pending;
+        _activeUsers = active;
+      });
+    } catch (e) {
+      print("Error loading users: $e");
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // ✅ NEW: Logic to Assign Section
+  void _showSectionDialog(dynamic user) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return SimpleDialog(
+          title: Text("Assign Section to ${user['name']}"),
+          children: _sections.map((section) {
+            return SimpleDialogOption(
+              padding: EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(section, style: TextStyle(fontSize: 16)),
+                  // Show checkmark if already assigned
+                  if ((user['assignedSection'] ?? 'All') == section)
+                    Icon(Icons.check, color: Colors.green),
+                ],
+              ),
+              onPressed: () async {
+                Navigator.pop(ctx); // Close dialog
+                bool success = await ApiService.assignUserSection(
+                  user['_id'],
+                  section,
+                );
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Updated to $section")),
+                  );
+                  _loadData(); // Refresh UI
+                } else {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("Update Failed")));
+                }
+              },
+            );
+          }).toList(),
+        );
+      },
+    );
   }
 
   void _approve(String id) async {
@@ -73,7 +137,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Staff Management"),
+        title: Text("Staff & Sections"),
         bottom: TabBar(
           controller: _tabController,
           tabs: [
@@ -82,28 +146,44 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
           ],
         ),
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                // 1. Pending List
-                _buildList(_pendingUsers, isPending: true),
-                // 2. Active List
-                _buildList(_activeUsers, isPending: false),
-              ],
-            ),
+      body: RefreshIndicator(
+        onRefresh: _loadData,
+        child: _isLoading
+            ? Center(child: CircularProgressIndicator())
+            : TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildList(_pendingUsers, isPending: true),
+                  _buildList(_activeUsers, isPending: false),
+                ],
+              ),
+      ),
     );
   }
 
   Widget _buildList(List<dynamic> users, {required bool isPending}) {
-    if (users.isEmpty) return Center(child: Text("No users found here."));
+    if (users.isEmpty) {
+      return ListView(
+        physics: AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: 100),
+          Center(
+            child: Text(
+              "No users found here.",
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+        ],
+      );
+    }
+
     return ListView.builder(
+      physics: AlwaysScrollableScrollPhysics(),
       itemCount: users.length,
       itemBuilder: (ctx, i) {
         final u = users[i];
-        // Don't let admin delete themselves from list
-        if (!isPending && u['role'] == 'admin') return SizedBox.shrink();
+        if (!isPending && u['role'] == 'admin')
+          return SizedBox.shrink(); // Don't show admin in delete list
 
         return Card(
           child: ListTile(
@@ -112,18 +192,36 @@ class _AdminUsersScreenState extends State<AdminUsersScreen>
               color: isPending ? Colors.orange : Colors.blue,
             ),
             title: Text(u['name'] ?? "Unknown"),
-            subtitle: Text(u['email'] ?? ""),
+            // ✅ Show Assigned Section in subtitle
+            subtitle: Text(
+              "${u['email']}\nSection: ${u['assignedSection'] ?? 'All'}",
+            ),
+            isThreeLine: true,
             trailing: isPending
                 ? ElevatedButton(
                     onPressed: () => _approve(u['_id']),
                     child: Text("Approve"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
                     ),
                   )
-                : IconButton(
-                    icon: Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => _delete(u['_id'], u['name']),
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // ✅ ASSIGN SECTION BUTTON
+                      IconButton(
+                        icon: Icon(Icons.store, color: Colors.blueAccent),
+                        tooltip: "Assign Section",
+                        onPressed: () => _showSectionDialog(u),
+                      ),
+                      // DELETE BUTTON
+                      IconButton(
+                        icon: Icon(Icons.delete, color: Colors.red),
+                        tooltip: "Revoke Access",
+                        onPressed: () => _delete(u['_id'], u['name']),
+                      ),
+                    ],
                   ),
           ),
         );

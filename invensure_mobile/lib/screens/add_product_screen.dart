@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/api_service.dart';
-import 'package:image_picker/image_picker.dart'; // 📸
-import 'package:flutter_image_compress/flutter_image_compress.dart'; // 🤏
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 class AddProductScreen extends StatefulWidget {
   @override
@@ -16,29 +16,42 @@ class _AddProductScreenState extends State<AddProductScreen> {
   final _nameController = TextEditingController();
   final _expiryController = TextEditingController();
 
+  // ✅ NEW: Category State
+  String _selectedCategory = "General";
+  final List<String> _categories = [
+    "General",
+    "Dairy",
+    "Vegetables",
+    "Fruits",
+    "Meat",
+    "Medicine",
+    "Beverages",
+    "Snacks",
+    "Household",
+    "Bakery",
+  ];
+
   bool _isScanning = false;
   bool _isSubmitting = false;
-  File? _selectedImage; // To show preview
-  String? _base64Image; // To send to database
+  File? _selectedImage;
+  String? _base64Image;
 
-  // 📸 LOGIC: Pick & Compress Image
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
     final XFile? photo = await picker.pickImage(source: source);
 
     if (photo != null) {
-      // Compress the image (MongoDB handles small strings better)
       final result = await FlutterImageCompress.compressWithFile(
         photo.path,
-        minWidth: 500, // Make it smaller
+        minWidth: 500,
         minHeight: 500,
-        quality: 50, // Reduce quality to 50%
+        quality: 50,
       );
 
       if (result != null) {
         setState(() {
           _selectedImage = File(photo.path);
-          _base64Image = base64Encode(result); // Convert to String
+          _base64Image = base64Encode(result);
         });
       }
     }
@@ -68,16 +81,17 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
     setState(() => _isSubmitting = true);
     try {
-      // ✅ Send image along with details
+      // ✅ UPDATED: Pass category to API
       await ApiService.addProduct(
         _idController.text,
         _nameController.text,
         _expiryController.text,
+        _selectedCategory, // <--- Passing the selected category
         _base64Image,
       );
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("✅ Added with Image!")));
+      ).showSnackBar(SnackBar(content: Text("✅ Added Product!")));
       Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(
@@ -109,7 +123,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
         padding: EdgeInsets.all(16),
         child: Column(
           children: [
-            // 📸 IMAGE PREVIEW BOX
+            // IMAGE BOX
             GestureDetector(
               onTap: () {
                 showModalBottomSheet(
@@ -162,30 +176,69 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
             SizedBox(height: 20),
 
+            // BARCODE & NAME
             Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _idController,
-                    decoration: InputDecoration(labelText: "Barcode ID"),
+                    decoration: InputDecoration(
+                      labelText: "Barcode ID",
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ),
+                SizedBox(width: 10),
                 IconButton(
-                  icon: Icon(Icons.qr_code_scanner),
+                  icon: Icon(Icons.qr_code_scanner, size: 30),
+                  color: Colors.blue,
                   onPressed: () => setState(() => _isScanning = true),
                 ),
               ],
             ),
+            SizedBox(height: 15),
 
             TextField(
               controller: _nameController,
-              decoration: InputDecoration(labelText: "Product Name"),
+              decoration: InputDecoration(
+                labelText: "Product Name",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            SizedBox(height: 15),
+
+            // ✅ CATEGORY DROPDOWN
+            InputDecorator(
+              decoration: InputDecoration(
+                labelText: "Category",
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedCategory,
+                  isExpanded: true,
+                  onChanged: (val) {
+                    if (val != null) setState(() => _selectedCategory = val);
+                  },
+                  items: _categories
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                ),
+              ),
             ),
 
+            SizedBox(height: 15),
+
+            // EXPIRY
             TextField(
               controller: _expiryController,
               decoration: InputDecoration(
-                labelText: "Expiry (YYYY-MM-DD)",
+                labelText: "Expiry Date",
+                border: OutlineInputBorder(),
                 suffixIcon: Icon(Icons.calendar_today),
               ),
               onTap: () async {
@@ -203,13 +256,21 @@ class _AddProductScreenState extends State<AddProductScreen> {
             SizedBox(height: 30),
             _isSubmitting
                 ? CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _submit,
-                    child: Text("Add to Inventory"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      minimumSize: Size(double.infinity, 50),
-                      foregroundColor: Colors.white,
+                : SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _submit,
+                      child: Padding(
+                        padding: const EdgeInsets.all(15.0),
+                        child: Text(
+                          "ADD TO INVENTORY",
+                          style: TextStyle(fontSize: 16),
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                   ),
           ],

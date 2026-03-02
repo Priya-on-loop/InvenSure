@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
-import 'recycler_dashboard.dart';
+import 'recycler_dashboard.dart'; // ✅ Required for navigation
 import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -16,7 +16,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-
   bool _isLoading = false;
 
   void _submit() async {
@@ -51,28 +50,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (data['success'] == true) {
       if (_isLogin) {
-        // ✅ LOGIN SUCCESS
+        // --- LOGIN SUCCESS ---
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('token', data['token']);
 
-        // Normalize role
+        // Ensure role is consistent (lowercase)
         String role = (data['role'] ?? 'staff').toString().toLowerCase();
         await prefs.setString('role', role);
 
-        // ✅ ROLE-BASED NAVIGATION
+        // ✅ FIXED NAVIGATION LOGIC
         if (role == 'recycler') {
+          print("Routing to Recycler Dashboard");
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => RecyclerDashboard()),
           );
         } else {
+          print("Routing to Staff/Admin Dashboard");
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => DashboardScreen()),
           );
         }
       } else {
-        // ✅ REGISTER SUCCESS
+        // --- REGISTER SUCCESS ---
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -89,7 +90,7 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     } else {
-      // ❌ ERROR
+      // Error
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(data['message'] ?? 'Action failed'),
@@ -104,7 +105,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(_isLogin ? "InvenSure Login" : "Register Account"),
+        title: Text(_isLogin ? "InvenSure Login" : "Create Account"),
         elevation: 0,
       ),
       body: Center(
@@ -113,7 +114,6 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo
               Container(
                 height: 140,
                 decoration: BoxDecoration(
@@ -122,9 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 child: Image.asset('assets/logo.png', height: 140),
               ),
-
               SizedBox(height: 10),
-
               Column(
                 children: [
                   Text(
@@ -149,9 +147,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
-
               SizedBox(height: 40),
 
+              // Register Fields
               if (!_isLogin) ...[
                 TextField(
                   controller: _nameController,
@@ -162,13 +160,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 SizedBox(height: 10),
 
+                // ROLE SELECTOR
                 DropdownButtonFormField<String>(
                   value: _selectedRole,
                   decoration: InputDecoration(
                     labelText: "I am a...",
                     border: OutlineInputBorder(),
                   ),
-                  items: const [
+                  items: [
                     DropdownMenuItem(
                       value: "staff",
                       child: Text("Staff Member"),
@@ -186,13 +185,12 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _emailController,
                 decoration: InputDecoration(
-                  labelText: _isLogin ? "Email OR Name" : "Email Address",
+                  labelText: _isLogin ? "Email OR Full Name" : "Email Address",
                   prefixIcon: Icon(_isLogin ? Icons.person : Icons.email),
                   border: OutlineInputBorder(),
                 ),
               ),
               SizedBox(height: 10),
-
               TextField(
                 controller: _passwordController,
                 decoration: InputDecoration(
@@ -204,32 +202,32 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               SizedBox(height: 25),
-
               _isLoading
                   ? CircularProgressIndicator()
                   : SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _submit,
-                        style: ElevatedButton.styleFrom(
+                        child: Padding(
                           padding: EdgeInsets.all(14),
+                          child: Text(
+                            _isLogin ? "LOGIN" : "REGISTER",
+                            style: TextStyle(fontSize: 16),
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                        ),
-                        child: Text(
-                          _isLogin ? "LOGIN" : "REGISTER",
-                          style: TextStyle(fontSize: 16),
                         ),
                       ),
                     ),
 
               SizedBox(height: 20),
-
               TextButton(
                 onPressed: () => setState(() => _isLogin = !_isLogin),
                 child: Text(
-                  _isLogin ? "Register as Staff/Recycler" : "Back to Login",
+                  _isLogin ? "New User? Register Here" : "Back to Login",
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),

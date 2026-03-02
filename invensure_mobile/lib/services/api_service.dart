@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  // ✅ Ensure this is your active Cloud/Ngrok URL
+  // ✅ Ensure this is your active Cloud Render URL
   static String baseUrl = "https://invensure-xv6j.onrender.com";
 
   static Future<String?> getToken() async {
@@ -11,12 +11,12 @@ class ApiService {
     return prefs.getString('token');
   }
 
-  // 1. REGISTER (Updated to accept 'role')
+  // 1. REGISTER
   static Future<Map<String, dynamic>> register(
     String name,
     String email,
     String password,
-    String role, // ✅ NEW: Allows registering as 'staff' or 'recycler'
+    String role,
   ) async {
     try {
       final response = await http.post(
@@ -35,7 +35,7 @@ class ApiService {
     }
   }
 
-  // 2. LOGIN (Email OR Name)
+  // 2. LOGIN
   static Future<Map<String, dynamic>> login(
     String input,
     String password,
@@ -44,10 +44,7 @@ class ApiService {
       final response = await http.post(
         Uri.parse('$baseUrl/login'),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "email": input, // Send input (email/name) to backend check
-          "password": password,
-        }),
+        body: jsonEncode({"email": input, "password": password}),
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -57,7 +54,7 @@ class ApiService {
 
   // --- ADMIN USER MANAGEMENT ---
 
-  // 3. GET USERS (pending/active)
+  // 3. GET USERS
   static Future<List<dynamic>> getUsers(String type) async {
     final token = await getToken();
     try {
@@ -100,9 +97,27 @@ class ApiService {
     return res.statusCode == 200;
   }
 
-  // --- RECYCLER WORKFLOW (✅ NEW ADDITIONS) ---
+  // ✅ 6. ASSIGN SECTION TO STAFF (NEW FEATURE)
+  static Future<bool> assignUserSection(String userId, String section) async {
+    final token = await getToken();
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/admin/assign-section'),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+        body: jsonEncode({"userId": userId, "section": section}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
 
-  // 6. GET RECYCLERS LIST (For Admin to select who does the job)
+  // --- RECYCLER WORKFLOW ---
+
+  // 7. GET RECYCLERS LIST
   static Future<List<dynamic>> getRecyclersList() async {
     final token = await getToken();
     try {
@@ -118,7 +133,7 @@ class ApiService {
     }
   }
 
-  // 7. ASSIGN RECYCLE TASK (Admin)
+  // 8. ASSIGN RECYCLE TASK
   static Future<bool> assignTask(int productId, String recyclerMongoId) async {
     final token = await getToken();
     try {
@@ -136,7 +151,7 @@ class ApiService {
     }
   }
 
-  // 8. GET ASSIGNED TASKS (For Recycler View)
+  // 9. GET ASSIGNED TASKS
   static Future<List<dynamic>> getRecyclerTasks() async {
     final token = await getToken();
     try {
@@ -151,7 +166,7 @@ class ApiService {
     }
   }
 
-  // 9. COMPLETE RECYCLE (Recycler finishes job -> Blockchain)
+  // 10. COMPLETE RECYCLE
   static Future<bool> completeRecycleTask(int productId) async {
     final token = await getToken();
     try {
@@ -189,6 +204,7 @@ class ApiService {
     String id,
     String name,
     String expiry,
+    String category,
     String? img,
   ) async {
     final token = await getToken();
@@ -205,12 +221,12 @@ class ApiService {
         "id": numericId,
         "name": name,
         "expiry": expiry,
+        "category": category,
         "image": img ?? "",
       }),
     );
   }
 
-  // Keep for backup/direct delete, though AssignTask is preferred now
   static Future<void> recycleProduct(int id) async {
     final token = await getToken();
     await http.post(

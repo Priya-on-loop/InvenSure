@@ -14,7 +14,7 @@ dependencies:
   # Default icon set
   cupertino_icons: ^1.0.8
 
-  # InvenSure packages (API & Data)
+  # API & Data Storage
   http: ^1.2.0
   shared_preferences: ^2.2.2
   intl: ^0.19.0
@@ -30,28 +30,41 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   timezone: ^0.9.2
 
-  # ✅ NEW: IMAGE & COMPRESSION (Added these!)
+  # Image Camera & Compression
   image_picker: ^1.0.7
   flutter_image_compress: ^2.1.0
 
-# Tools used for building
 dev_dependencies:
   flutter_test:
     sdk: flutter
   
+  # Lints
   flutter_lints: ^6.0.0
   
+  # Generators (App Icon & Splash Screen)
   flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.1
 
-# Configuration
+# Configuration for Flutter Resources
 flutter:
   uses-material-design: true
 
+  # Asset Registration
   assets:
     - assets/logo.png
 
+# Configuration: App Icon Generator
 flutter_launcher_icons:
   android: "ic_launcher"
   ios: true
   image_path: "assets/logo.png"
   min_sdk_android: 21
+
+# Configuration: Native Splash Screen
+flutter_native_splash:
+  color: "#ffffff"
+  image: "assets/logo.png"
+  branding: "InvenSure"
+  android_12:
+    image: "assets/logo.png"
+    color: "#ffffff"

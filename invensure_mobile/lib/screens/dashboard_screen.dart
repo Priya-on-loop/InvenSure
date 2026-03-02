@@ -11,8 +11,13 @@ import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
 import 'settings_screen.dart';
 import 'admin_users_screen.dart';
+import '../components/side_menu.dart';
 
 class DashboardScreen extends StatefulWidget {
+  // ✅ ADDED: Accept category filter from Sidebar
+  final String? filterCategory;
+  DashboardScreen({this.filterCategory});
+
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
 }
@@ -46,7 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           setState(() {
             _allProducts = data;
             _isLoading = false;
-            _applyFilters();
+            _applyFilters(); // ✅ Apply filter immediately on load
           });
           _checkAndTriggerNotifications(data);
         })
@@ -77,41 +82,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
           alertCount++;
         }
       } catch (e) {
-        // print("Date error: $e");
+        // Date error ignored
       }
     }
 
     if (alertCount > 0) {
-      Future.delayed(Duration.zero, () {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("🔔 Alert: $alertCount items expiring soon!"),
-              backgroundColor: Colors.blueAccent,
-              duration: Duration(seconds: 4),
-            ),
-          );
-        }
-      });
-
-      NotificationService.showNotification(
-        id: 101,
-        title: "InvenSure Alert",
-        body:
-            "Action Required: $alertCount items expiring within $userDaysSetting days.",
-      );
+      // Logic for popup notification here if needed
     }
   }
 
+  // ✅ UPDATED: Filtering Logic to include Category
   void _applyFilters() {
     String query = _searchController.text.toLowerCase();
+    String? categoryFilter = widget.filterCategory?.toLowerCase();
+
     setState(() {
       _filteredProducts = _allProducts.where((p) {
+        // 1. Status Filter (Tabs)
         if (_selectedStatus != "All" && p['status'] != _selectedStatus)
           return false;
+
         String name = p['name'].toString().toLowerCase();
         String id = p['id'].toString();
-        return name.contains(query) || id.contains(query);
+        // Safe check for category existence
+        String pCategory = (p['category'] ?? "General")
+            .toString()
+            .toLowerCase();
+
+        // 2. Category Filter (From Sidebar)
+        if (categoryFilter != null && categoryFilter.isNotEmpty) {
+          if (pCategory != categoryFilter) return false;
+        }
+
+        // 3. Search Filter
+        bool matchesSearch = name.contains(query) || id.contains(query);
+        return matchesSearch;
       }).toList();
     });
   }
@@ -133,13 +138,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             pw.Text("Filter: $_selectedStatus Products"),
+            if (widget.filterCategory != null)
+              pw.Text("Category: ${widget.filterCategory}"),
+            pw.SizedBox(height: 10),
             pw.Table.fromTextArray(
-              headers: ["ID", "Product Name", "Expiry", "Status"],
+              headers: ["ID", "Name", "Category", "Expiry", "Status"],
               data: _filteredProducts
                   .map(
                     (p) => [
                       p['id'].toString(),
                       p['name'].toString(),
+                      p['category']?.toString() ?? "-",
                       p['expiry'].toString(),
                       p['status'].toString(),
                     ],
@@ -156,18 +165,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ✅ UPDATED LOGIC: Prompt to Assign Recycler
   void _assignRecycle(int prodId) async {
-    // 1. Fetch Recyclers list from backend
     List<dynamic> recyclers = await ApiService.getRecyclersList();
-
     if (recyclers.isEmpty) {
-      // Fallback if no recyclers exist -> Do old immediate delete
       _directRecycle(prodId);
       return;
     }
 
-    // 2. Show Assignment Dialog
     showDialog(
       context: context,
       builder: (context) {
@@ -179,16 +183,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 padding: EdgeInsets.all(12),
                 child: Text(r['name'], style: TextStyle(fontSize: 16)),
                 onPressed: () async {
-                  Navigator.pop(context); // Close dialog
+                  Navigator.pop(context);
                   await ApiService.assignTask(prodId, r['_id']);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text("Job assigned to ${r['name']}")),
                   );
-                  _loadProducts(); // Refresh list
+                  _loadProducts();
                 },
               );
             }).toList(),
-            // Option to cancel
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: TextButton(
@@ -202,23 +205,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Legacy fallback if no recyclers registered (or for immediate trash)
   void _directRecycle(int id) async {
     bool confirm =
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
             title: Text("No Recyclers Found"),
-            content: Text(
-              "Do you want to recycle this item immediately on the Blockchain?",
-            ),
+            content: Text("Recycle immediately on Blockchain?"),
             actions: [
               TextButton(
                 child: Text("Cancel"),
                 onPressed: () => Navigator.pop(context, false),
               ),
               TextButton(
-                child: Text("Recycle Now"),
+                child: Text("Confirm"),
                 onPressed: () => Navigator.pop(context, true),
               ),
             ],
@@ -252,42 +252,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Counts logic...
     int fresh = _allProducts.where((p) => p['status'] == 'Fresh').length;
     int near = _allProducts.where((p) => p['status'] == 'Near Expiry').length;
     int expired = _allProducts.where((p) => p['status'] == 'Expired').length;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Dashboard"),
-        actions: [
-          IconButton(icon: Icon(Icons.picture_as_pdf), onPressed: _generatePdf),
-          IconButton(
-            icon: Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => SettingsScreen()),
-              ).then((_) => _loadProducts());
-            },
-          ),
+      backgroundColor: Color(0xFFF5F7FA),
+      drawer: SideMenu(),
 
+      appBar: AppBar(
+        // ✅ Dynamic Title: Shows "Dairy Inventory" or just "Dashboard"
+        title: Text(
+          widget.filterCategory != null
+              ? "${widget.filterCategory} Inventory"
+              : "Dashboard",
+          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: IconThemeData(color: Colors.black87),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.picture_as_pdf, color: Colors.blueAccent),
+            onPressed: _generatePdf,
+          ),
           if (_userRole == 'admin')
             IconButton(
               icon: Icon(Icons.manage_accounts, color: Colors.redAccent),
-              tooltip: "Manage Staff",
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => AdminUsersScreen()),
-                );
-              },
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => AdminUsersScreen()),
+              ),
             ),
-
-          IconButton(icon: Icon(Icons.logout), onPressed: _logout),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        child: Icon(Icons.qr_code_scanner),
+
+      floatingActionButton: FloatingActionButton.extended(
+        icon: Icon(Icons.qr_code_scanner),
+        label: Text("Scan Item"),
+        backgroundColor: Colors.blueAccent,
         onPressed: () async {
           await Navigator.push(
             context,
@@ -296,21 +300,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _loadProducts();
         },
       ),
+
       body: Column(
         children: [
+          // 1. STATS (Only show on main dashboard, hide if filtered by category to save space)
+          if (widget.filterCategory == null)
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                children: [
+                  _buildModernStatCard("Fresh", fresh, [
+                    Color(0xFF66BB6A),
+                    Color(0xFF43A047),
+                  ]),
+                  SizedBox(width: 8),
+                  _buildModernStatCard("Warning", near, [
+                    Color(0xFFFFA726),
+                    Color(0xFFFB8C00),
+                  ]),
+                  SizedBox(width: 8),
+                  _buildModernStatCard("Expired", expired, [
+                    Color(0xFFEF5350),
+                    Color(0xFFE53935),
+                  ]),
+                ],
+              ),
+            ),
+
+          // 2. SEARCH BAR
           Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                _buildStatCard("Fresh", fresh, Colors.green),
-                _buildStatCard("Warning", near, Colors.orange),
-                _buildStatCard("Expired", expired, Colors.red),
-              ],
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 5,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: "Search inventory...",
+                  prefixIcon: Icon(Icons.search, color: Colors.grey),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.all(15),
+                ),
+                onChanged: (val) => _applyFilters(),
+              ),
             ),
           ),
+
+          // 3. Filters
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.symmetric(horizontal: 10),
+            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             child: Row(
               children: [
                 _buildFilterChip("All", Colors.blue),
@@ -322,74 +370,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-          SizedBox(height: 5),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: "Search...",
-                prefixIcon: Icon(Icons.search),
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onChanged: (val) => _applyFilters(),
-            ),
-          ),
+
+          // 4. List View
           Expanded(
             child: _isLoading
                 ? Center(child: CircularProgressIndicator())
-                : ListView.builder(
-                    itemCount: _filteredProducts.length,
-                    itemBuilder: (context, index) {
-                      final p = _filteredProducts[index];
-                      return Card(
-                        margin: EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        child: ListTile(
-                          leading: Container(
-                            width: 50,
-                            height: 50,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.grey[200],
-                            ),
-                            child: ClipOval(
-                              child:
-                                  (p['image'] != null &&
-                                      p['image'].toString().length > 100)
-                                  ? Image.memory(
-                                      base64Decode(p['image']),
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (ctx, err, stack) =>
-                                          _fallbackIcon(p['status']),
-                                    )
-                                  : _fallbackIcon(p['status']),
-                            ),
-                          ),
-                          title: Text(
-                            p['name'],
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text("Expires: ${p['expiry']}"),
-                          trailing:
-                              // ✅ Updated to call Assign function instead of Direct Delete
-                              (_userRole == 'admin' &&
-                                  p['status'] != 'Recycled')
-                              ? IconButton(
-                                  icon: Icon(Icons.delete, color: Colors.red),
-                                  onPressed: () => _assignRecycle(
-                                    p['id'],
-                                  ), // <-- Calls new assignment flow
-                                )
-                              : null,
-                        ),
-                      );
+                : _filteredProducts.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.inbox, size: 50, color: Colors.grey),
+                        Text("No products found"),
+                      ],
+                    ),
+                  )
+                : RefreshIndicator(
+                    onRefresh: () async {
+                      _loadProducts();
                     },
+                    child: ListView.builder(
+                      padding: EdgeInsets.only(bottom: 80),
+                      itemCount: _filteredProducts.length,
+                      itemBuilder: (context, index) {
+                        final p = _filteredProducts[index];
+                        return Card(
+                          elevation: 2,
+                          margin: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            leading: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.grey[100],
+                              ),
+                              child: ClipOval(
+                                child:
+                                    (p['image'] != null &&
+                                        p['image'].toString().length > 100)
+                                    ? Image.memory(
+                                        base64Decode(p['image']),
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (c, e, s) =>
+                                            _fallbackIcon(p['status']),
+                                      )
+                                    : _fallbackIcon(p['status']),
+                              ),
+                            ),
+                            title: Text(
+                              p['name'],
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Expires: ${p['expiry']}",
+                                  style: TextStyle(color: Colors.grey[600]),
+                                ),
+                                Text(
+                                  p['category'] ?? "General",
+                                  style: TextStyle(
+                                    color: Colors.blueGrey,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ), // Show category
+                              ],
+                            ),
+                            trailing:
+                                (_userRole == 'admin' &&
+                                    p['status'] != 'Recycled')
+                                ? IconButton(
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: () => _assignRecycle(p['id']),
+                                  )
+                                : null,
+                          ),
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -397,33 +474,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Helpers
-  Widget _fallbackIcon(String status) {
-    return CircleAvatar(
-      backgroundColor: _getStatusColor(status),
-      child: Icon(Icons.inventory_2, color: Colors.white, size: 20),
-    );
-  }
-
-  Widget _buildFilterChip(String label, Color color) {
-    bool isSelected = _selectedStatus == label;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: isSelected,
-        selectedColor: color,
-        onSelected: (s) {
-          setState(() {
-            _selectedStatus = label;
-            _applyFilters();
-          });
-        },
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String title, int count, Color color) {
+  // ✅ WIDGET HELPERS
+  Widget _buildModernStatCard(String title, int count, List<Color> colors) {
     return Expanded(
       child: GestureDetector(
         onTap: () {
@@ -438,35 +490,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
           });
         },
         child: Container(
-          margin: EdgeInsets.all(4),
-          padding: EdgeInsets.symmetric(vertical: 12),
+          padding: EdgeInsets.symmetric(vertical: 20),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.3)),
+            borderRadius: BorderRadius.circular(15),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: colors,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: colors[0].withOpacity(0.4),
+                blurRadius: 8,
+                offset: Offset(0, 4),
+              ),
+            ],
           ),
           child: Column(
             children: [
               Text(
                 count.toString(),
                 style: TextStyle(
+                  color: Colors.white,
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: color,
                 ),
               ),
               Text(
                 title,
                 style: TextStyle(
+                  color: Colors.white70,
                   fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black54,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, Color color) {
+    bool isSelected = _selectedStatus == label;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: isSelected,
+        selectedColor: color,
+        backgroundColor: Colors.white,
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : Colors.black87,
+        ),
+        onSelected: (s) {
+          setState(() {
+            _selectedStatus = label;
+            _applyFilters();
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _fallbackIcon(String status) {
+    return CircleAvatar(
+      backgroundColor: Colors.transparent,
+      child: Icon(Icons.inventory_2, color: _getStatusColor(status), size: 28),
     );
   }
 

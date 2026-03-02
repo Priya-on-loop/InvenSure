@@ -6,25 +6,26 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   
-  // Roles including recycler
+  // Roles: Admin, Staff, Recycler
   role: { type: String, enum: ["admin", "staff", "recycler"], default: "staff" },
   
-  // Security: Login approval
+  // Security: Account Approval
   isApproved: { type: Boolean, default: false },
 
-  // ✅ NEW: The specific section/aisle allowed for this staff
-  // Default is 'All' so they see everything until restricted by Admin
+  // Assigned Section (For Row-Level Security in aisles)
   assignedSection: { type: String, default: "All" } 
 });
 
-// Hash password before saving
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+// ✅ CORRECT: Using async/await WITHOUT 'next'
+userSchema.pre("save", async function () {
+  // If password is not modified, exit function
+  if (!this.isModified("password")) return;
+  
+  // Hash the password
   this.password = await bcrypt.hash(this.password, 10);
-  next();
 });
 
-// Method to verify password
+// Method to verify password during login
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
