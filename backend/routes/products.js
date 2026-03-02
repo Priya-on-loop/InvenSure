@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Product = require("../models/Product");
-const User = require("../models/User"); // ✅ Import User Model to find recyclers
+const User = require("../models/User"); // ✅ Import User Model
 const authMiddleware = require("../middleware/auth");
 const { ethers } = require("ethers");
 
@@ -33,7 +33,6 @@ const getContract = () => {
 // 1. ADD PRODUCT (Includes Category, Image & Blockchain)
 router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) => {
   try {
-    // ✅ Extract 'category' from request
     const { id, name, expiry, image, category } = req.body;
 
     const expiryTimestamp = new Date(expiry).getTime();
@@ -44,7 +43,6 @@ router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) 
       expiry: expiryTimestamp,
       recycled: false,
       image: image || "",
-      // ✅ Save Category (Default to General if missing)
       category: category || "General" 
     });
     await newProduct.save();
@@ -63,10 +61,24 @@ router.post("/addProduct", authMiddleware(["admin", "staff"]), async (req, res) 
   }
 });
 
-// 2. GET ALL PRODUCTS (Dashboard)
+// 2. GET ALL PRODUCTS (Modified for Section/Aisle Security)
 router.get("/allProducts", authMiddleware(["admin", "staff", "recycler"]), async (req, res) => {
   try {
-    const products = await Product.find();
+    let filter = {};
+
+    // 🔒 SECURITY CHECK: If user is STAFF, restrict them to their assigned section
+    if (req.user.role === 'staff') {
+      const currentUser = await User.findById(req.user.id);
+      
+      // If assigned 'All', they see everything. Otherwise, filter by category.
+      if (currentUser && currentUser.assignedSection && currentUser.assignedSection !== 'All') {
+        filter = { category: currentUser.assignedSection };
+      }
+    }
+
+    // Apply the filter (Admin/Recycler get empty filter = All products)
+    const products = await Product.find(filter);
+    
     const currentTime = Date.now();
     const threeDays = 3 * 24 * 60 * 60 * 1000;
 
@@ -88,7 +100,7 @@ router.get("/allProducts", authMiddleware(["admin", "staff", "recycler"]), async
         status: status,
         recycled: p.recycled,
         image: p.image,
-        category: p.category || "General", // ✅ Send category to frontend
+        category: p.category || "General",
         recyclingStatus: p.recyclingStatus
       };
     });
@@ -100,7 +112,7 @@ router.get("/allProducts", authMiddleware(["admin", "staff", "recycler"]), async
   }
 });
 
-// 3. ADMIN: DIRECT RECYCLE (Quick Action)
+// 3. ADMIN: DIRECT RECYCLE
 router.post("/recycleProduct/:id", authMiddleware(["admin"]), async (req, res) => {
   try {
     const productId = req.params.id;
@@ -108,7 +120,6 @@ router.post("/recycleProduct/:id", authMiddleware(["admin"]), async (req, res) =
     
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    // Blockchain
     const contract = getContract();
     if (contract) {
       try {
@@ -119,7 +130,6 @@ router.post("/recycleProduct/:id", authMiddleware(["admin"]), async (req, res) =
       }
     }
 
-    // Database
     product.recycled = true;
     product.recyclingStatus = "completed";
     await product.save();
@@ -131,12 +141,11 @@ router.post("/recycleProduct/:id", authMiddleware(["admin"]), async (req, res) =
   }
 });
 
-// --- ✅ NEW RECYCLER WORKFLOW ROUTES ---
+// --- RECYCLER WORKFLOW ROUTES ---
 
-// 4. GET AVAILABLE RECYCLERS (Admin)
+// 4. GET AVAILABLE RECYCLERS
 router.get("/recyclers/list", authMiddleware(["admin"]), async (req, res) => {
   try {
-    // Fetch users who registered as 'recycler' and are approved
     const recyclers = await User.find({ role: "recycler", isApproved: true }).select("name email");
     res.json({ recyclers });
   } catch (err) {
@@ -144,7 +153,7 @@ router.get("/recyclers/list", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
-// 5. ASSIGN RECYCLE TASK (Admin)
+// 5. ASSIGN RECYCLE TASK
 router.post("/assign-recycle/:id", authMiddleware(["admin"]), async (req, res) => {
   try {
     const { recyclerId } = req.body;
@@ -162,7 +171,7 @@ router.post("/assign-recycle/:id", authMiddleware(["admin"]), async (req, res) =
   }
 });
 
-// 6. GET ASSIGNED TASKS (Recycler)
+// 6. GET ASSIGNED TASKS
 router.get("/recycler/tasks", authMiddleware(["recycler"]), async (req, res) => {
   try {
     const tasks = await Product.find({ 
@@ -170,7 +179,6 @@ router.get("/recycler/tasks", authMiddleware(["recycler"]), async (req, res) => 
       recyclingStatus: "assigned" 
     });
     
-    // Format basic data for recycler view
     const formattedTasks = tasks.map(t => ({
       id: t.id,
       name: t.name,
@@ -184,13 +192,12 @@ router.get("/recycler/tasks", authMiddleware(["recycler"]), async (req, res) => 
   }
 });
 
-// 7. COMPLETE TASK (Recycler -> Updates Blockchain)
+// 7. COMPLETE TASK
 router.post("/recycler/complete/:id", authMiddleware(["recycler"]), async (req, res) => {
   try {
     const product = await Product.findOne({ id: req.params.id });
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    // A. Write to Blockchain
     const contract = getContract();
     if (contract) {
       try {
@@ -201,7 +208,6 @@ router.post("/recycler/complete/:id", authMiddleware(["recycler"]), async (req, 
       }
     }
 
-    // B. Update Database
     product.recyclingStatus = "completed";
     product.recycled = true;
     await product.save();

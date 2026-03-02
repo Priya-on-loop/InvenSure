@@ -7,21 +7,22 @@ const authMiddleware = require("../middleware/auth");
 // 1. REGISTER
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, role } = req.body; // ✅ Extract 'role'
+    const { name, email, password, role } = req.body;
     
-    const exists = await User.findOne({ email });
+    // Check if user exists (Email OR Name must be unique)
+    const exists = await User.findOne({ $or: [{ email }, { name }] });
     if (exists) return res.status(400).json({ success: false, message: "User exists" });
 
-    // ✅ VALIDATION: Only allow 'staff' or 'recycler'. Prevent 'admin' hacking.
-    let userRole = "staff"; // Default
-    if (role === "recycler") userRole = "recycler"; 
+    // Validate role: Allow 'staff' or 'recycler', default to 'staff'
+    let userRole = "staff";
+    if (role === "recycler") userRole = "recycler";
 
     const user = new User({ 
       name, 
       email, 
       password,
-      role: userRole,     // ✅ Use the validated role
-      isApproved: false   // Locked until you approve
+      role: userRole, 
+      isApproved: false // Always locked until admin approves
     });
     
     await user.save();
@@ -31,13 +32,12 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// 2. LOGIN (Email OR Name Feature)
+// 2. LOGIN (Email OR Name)
 router.post("/login", async (req, res) => {
   try {
-    // We expect 'email' field from frontend, but it could be a name
-    const { email, password } = req.body; 
+    const { email, password } = req.body; // 'email' field holds Name or Email
     
-    // ✅ Logic: Find by Email OR Find by Name
+    // Logic: Find by Email OR Name
     const user = await User.findOne({ 
       $or: [{ email: email }, { name: email }] 
     });
@@ -58,10 +58,10 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// 3. ADMIN: Get Users (Modified to accept a query)
+// 3. ADMIN: Get Users (Filter: pending vs active)
 router.get("/admin/users", authMiddleware(["admin"]), async (req, res) => {
   try {
-    // If query param 'type' is 'active', get active users. Else get pending.
+    // If 'active', get approved users. Else get pending.
     const filter = req.query.type === 'active' ? { isApproved: true } : { isApproved: false };
     const users = await User.find(filter).select("-password");
     res.json({ users });
@@ -70,7 +70,7 @@ router.get("/admin/users", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
-// 4. ADMIN: Approve
+// 4. ADMIN: Approve User
 router.post("/admin/approve", authMiddleware(["admin"]), async (req, res) => {
   try {
     const { userId } = req.body;
@@ -81,15 +81,26 @@ router.post("/admin/approve", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
-// 5. ADMIN: Delete Staff (✅ NEW FEATURE)
+// 5. ADMIN: Delete User (Revoke Access)
 router.post("/admin/delete", authMiddleware(["admin"]), async (req, res) => {
   try {
     const { userId } = req.body;
-    // Prevent Admin from deleting themselves!
     if(req.user.id === userId) return res.status(400).json({ message: "Cannot delete yourself" });
     
     await User.findByIdAndDelete(userId);
     res.json({ success: true, message: "User Deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. ADMIN: Assign Section to Staff (✅ NEW ROUTE)
+// Usage: Updates the 'assignedSection' field in the User document
+router.post("/admin/assign-section", authMiddleware(["admin"]), async (req, res) => {
+  try {
+    const { userId, section } = req.body;
+    await User.findByIdAndUpdate(userId, { assignedSection: section });
+    res.json({ success: true, message: `Staff assigned to ${section}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

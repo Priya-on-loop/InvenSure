@@ -6,17 +6,22 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   
-  // ✅ UPDATED: Added 'recycler' to the allowed roles
+  // Roles including recycler
   role: { type: String, enum: ["admin", "staff", "recycler"], default: "staff" },
   
-  // Security: Everyone starts locked out until approved
-  isApproved: { type: Boolean, default: false }, 
+  // Security: Login approval
+  isApproved: { type: Boolean, default: false },
+
+  // ✅ NEW: The specific section/aisle allowed for this staff
+  // Default is 'All' so they see everything until restricted by Admin
+  assignedSection: { type: String, default: "All" } 
 });
 
 // Hash password before saving
-userSchema.pre("save", async function () {
-  if (!this.isModified("password")) return;
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 10);
+  next();
 });
 
 // Method to verify password
