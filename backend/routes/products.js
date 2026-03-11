@@ -11,7 +11,7 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
 
 // Simple ABI based on your ExpiryTracker.sol
-const CONTRACT_ABI = [
+const CONTRACT_ABI =[
   "function addProduct(uint256 _productId, string memory _name, uint256 _expiryDate) public",
   "function markAsRecycled(uint256 _productId) public"
 ];
@@ -96,7 +96,8 @@ router.get("/allProducts", authMiddleware(["admin", "staff", "recycler"]), async
       return {
         id: p.id,
         name: p.name,
-        expiry: new Date(p.expiry).toLocaleDateString(),
+        // ✅ FIXED DATE FORMAT: Changed to ISO format so Flutter doesn't crash
+        expiry: new Date(p.expiry).toISOString().split('T')[0],
         status: status,
         recycled: p.recycled,
         image: p.image,
@@ -182,7 +183,8 @@ router.get("/recycler/tasks", authMiddleware(["recycler"]), async (req, res) => 
     const formattedTasks = tasks.map(t => ({
       id: t.id,
       name: t.name,
-      expiry: new Date(t.expiry).toLocaleDateString(),
+      // ✅ FIXED DATE FORMAT HERE TOO
+      expiry: new Date(t.expiry).toISOString().split('T')[0],
       image: t.image
     }));
 
